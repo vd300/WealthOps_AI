@@ -227,6 +227,19 @@ Acceptance criteria:
 - Stores token usage if available.
 - Stores compliance result.
 
+### [x] Phase 3.5: Real LLM Provider Integration
+
+Acceptance criteria:
+
+- Keeps the mock LLM provider for tests and local development.
+- Uses the provider-agnostic `LLMClient` interface for mock and real providers.
+- Supports `LLM_PROVIDER=mock`, `LLM_PROVIDER=openai`, and `LLM_PROVIDER=azure_openai`.
+- Adds configuration for API key, base URL, model name, timeout, max retries, and Azure API version.
+- Applies timeout and bounded retry handling around real LLM calls.
+- Logs provider, model, latency, and sanitized failure reason without logging secrets or full prompts.
+- Stores provider, model, latency, and available token usage in RAG audit logs.
+- Keeps tests independent of real LLM API keys.
+
 ## Phase 4: Portfolio Intelligence
 
 ### [ ] Task 4.1: Portfolio Upload API

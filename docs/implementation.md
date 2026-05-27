@@ -9,6 +9,7 @@ This file tracks how the project is implemented. Update it as tasks are complete
 | Phase 1: Foundation | Complete |
 | Phase 2: Document Ingestion | Complete |
 | Phase 3: RAG Q&A | Complete |
+| Phase 3.5: Real LLM Provider Integration | Complete |
 | Phase 4: Portfolio Intelligence | Not Started |
 | Phase 5: Compliance | Not Started |
 | Phase 6: Agentic Workflow | Not Started |
@@ -274,10 +275,102 @@ pytest
 
 ## Phase 3 Limitations
 
-- Real LLM providers are not implemented yet; unsupported providers fall back to the local mock client.
 - Query rewriting, reranking, streaming responses, caching, and token cost estimation are not implemented.
 - Access control for document-level permissions is not implemented.
 - Compliance guardrails are limited to basic status fields until Phase 5.
+
+## Phase 3.5 Implementation Summary
+
+Phase 3.5 real LLM provider integration is implemented.
+
+Implemented:
+
+- Kept `MockLLMClient` as the default local and test provider.
+- Added OpenAI-compatible chat completions support for `LLM_PROVIDER=openai`.
+- Added Azure OpenAI-compatible chat completions support for `LLM_PROVIDER=azure_openai`.
+- Added LLM configuration:
+  - `LLM_BASE_URL`
+  - `LLM_TIMEOUT_SECONDS`
+  - `LLM_MAX_RETRIES`
+  - `AZURE_OPENAI_API_VERSION`
+- Added bounded retry handling for transient real-provider failures.
+- Added request timeouts around real-provider HTTP calls.
+- Added sanitized LLM request logging for provider, model, latency, attempt, and failure reason.
+- Preserved prompt secrecy by not logging API keys, authorization headers, or full prompts.
+- Added `total_tokens` to `LLMResponse` and stores token usage in RAG audit log metadata when available.
+- Added tests for real provider adapters using fake HTTP clients, so tests require no real API keys.
+
+## Phase 3.5 Files Changed
+
+- `apps/api-gateway/app/core/config.py`
+- `apps/api-gateway/app/services/llm.py`
+- `apps/api-gateway/app/services/rag.py`
+- `apps/api-gateway/app/db/rag.py`
+- `tests/test_rag.py`
+- `.env.example`
+- `infra/docker-compose/docker-compose.yml`
+- `README.md`
+- `docs/task.md`
+- `docs/implementation.md`
+
+## Phase 3.5 Design Decisions
+
+- The mock provider remains selected with `LLM_PROVIDER=mock` and does not require a real API key.
+- OpenAI-compatible providers use `POST {LLM_BASE_URL}/chat/completions` with a bearer token.
+- Azure OpenAI uses `LLM_BASE_URL` as the Azure resource endpoint and `LLM_MODEL` as the deployment name.
+- Real-provider retries are limited to timeout, network, rate-limit, and server-side failure cases.
+- Provider logs intentionally include only operational metadata, not secrets or sensitive prompt text.
+
+## Phase 3.5 Validation Commands
+
+Run the app with the mock provider:
+
+```powershell
+$env:LLM_PROVIDER="mock"; $env:LLM_API_KEY="local-development-placeholder"; $env:LLM_MODEL="mock-rag-local"; docker compose -f infra/docker-compose/docker-compose.yml up --build
+```
+
+Call `POST /rag/query` with the mock provider:
+
+```powershell
+curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"top_k\":5}"
+```
+
+Run the app with a real OpenAI-compatible provider configured:
+
+```powershell
+$env:LLM_PROVIDER="openai"; $env:LLM_API_KEY="<OPENAI_API_KEY>"; $env:LLM_MODEL="gpt-4o-mini"; $env:LLM_BASE_URL="https://api.openai.com/v1"; $env:LLM_TIMEOUT_SECONDS="20"; $env:LLM_MAX_RETRIES="2"; docker compose -f infra/docker-compose/docker-compose.yml up --build
+```
+
+Run the app with Azure OpenAI configured:
+
+```powershell
+$env:LLM_PROVIDER="azure_openai"; $env:LLM_API_KEY="<AZURE_OPENAI_API_KEY>"; $env:LLM_MODEL="<AZURE_DEPLOYMENT_NAME>"; $env:LLM_BASE_URL="https://<RESOURCE_NAME>.openai.azure.com"; $env:AZURE_OPENAI_API_VERSION="2024-02-15-preview"; docker compose -f infra/docker-compose/docker-compose.yml up --build
+```
+
+Call `POST /rag/query` with the real provider:
+
+```powershell
+curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"top_k\":5}"
+```
+
+Verify audit logs store provider, model, latency, and token usage if available:
+
+```bash
+docker compose -f infra/docker-compose/docker-compose.yml exec postgres psql -U wealthops -d wealthops -c "SELECT llm_provider, llm_model, prompt_tokens, completion_tokens, latency_ms, metadata->'token_usage' AS token_usage, created_at FROM rag_audit_logs ORDER BY created_at DESC LIMIT 10;"
+```
+
+Run tests without real API keys:
+
+```bash
+pytest
+```
+
+## Phase 3.5 Limitations
+
+- Streaming responses are not implemented.
+- Token cost estimation is not implemented.
+- Real embedding providers are still deferred; document ingestion and retrieval continue to use the mock embedding provider unless extended later.
+- Provider-specific advanced options beyond model, base URL, timeout, retries, and Azure API version are not exposed yet.
 
 ## Phase 3 Intentionally Skipped Features
 

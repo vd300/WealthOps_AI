@@ -2,7 +2,7 @@
 
 WealthOps AI is a secure, cloud-native AI platform for financial document intelligence, portfolio analysis, and compliance-aware LLM workflows.
 
-This repository currently implements **Phase 1: Foundation**, **Phase 2: Document Ingestion**, and **Phase 3: RAG Q&A**.
+This repository currently implements **Phase 1: Foundation**, **Phase 2: Document Ingestion**, **Phase 3: RAG Q&A**, and **Phase 3.5: Real LLM Provider Integration**.
 
 ## Phase 1 Includes
 
@@ -43,6 +43,16 @@ This repository currently implements **Phase 1: Foundation**, **Phase 2: Documen
 - Confidence score and retrieved chunk summaries
 - Safe insufficient-context response for empty retrieval
 - PostgreSQL RAG audit logs
+
+## Phase 3.5 Includes
+
+- Mock LLM provider retained for local development and tests
+- OpenAI-compatible provider support with `LLM_PROVIDER=openai`
+- Azure OpenAI-compatible provider support with `LLM_PROVIDER=azure_openai`
+- LLM config for API key, base URL, model, timeout, max retries, and Azure API version
+- Timeout and retry handling around real LLM calls
+- Sanitized provider logging for provider, model, latency, and failure reason
+- RAG audit log storage for provider, model, latency, and token usage when available
 
 ## Not Implemented Yet
 
@@ -245,6 +255,46 @@ Check RAG audit logs in PostgreSQL:
 
 ```bash
 docker compose -f infra/docker-compose/docker-compose.yml exec postgres psql -U wealthops -d wealthops -c "SELECT user_id, question, retrieved_chunk_ids, llm_provider, llm_model, latency_ms, response_status, compliance_status, created_at FROM rag_audit_logs ORDER BY created_at DESC LIMIT 10;"
+```
+
+## Run With Mock LLM Provider
+
+The mock provider is the default local path and does not call any external LLM API:
+
+```powershell
+$env:LLM_PROVIDER="mock"; $env:LLM_API_KEY="local-development-placeholder"; $env:LLM_MODEL="mock-rag-local"; docker compose -f infra/docker-compose/docker-compose.yml up --build
+```
+
+Call `POST /rag/query` with the mock provider:
+
+```powershell
+curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"top_k\":5}"
+```
+
+## Run With A Real LLM Provider
+
+OpenAI-compatible provider:
+
+```powershell
+$env:LLM_PROVIDER="openai"; $env:LLM_API_KEY="<OPENAI_API_KEY>"; $env:LLM_MODEL="gpt-4o-mini"; $env:LLM_BASE_URL="https://api.openai.com/v1"; $env:LLM_TIMEOUT_SECONDS="20"; $env:LLM_MAX_RETRIES="2"; docker compose -f infra/docker-compose/docker-compose.yml up --build
+```
+
+Azure OpenAI-compatible provider:
+
+```powershell
+$env:LLM_PROVIDER="azure_openai"; $env:LLM_API_KEY="<AZURE_OPENAI_API_KEY>"; $env:LLM_MODEL="<AZURE_DEPLOYMENT_NAME>"; $env:LLM_BASE_URL="https://<RESOURCE_NAME>.openai.azure.com"; $env:AZURE_OPENAI_API_VERSION="2024-02-15-preview"; docker compose -f infra/docker-compose/docker-compose.yml up --build
+```
+
+Call `POST /rag/query` with the real provider:
+
+```powershell
+curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"top_k\":5}"
+```
+
+Verify RAG audit log provider, model, latency, and token usage:
+
+```bash
+docker compose -f infra/docker-compose/docker-compose.yml exec postgres psql -U wealthops -d wealthops -c "SELECT llm_provider, llm_model, prompt_tokens, completion_tokens, latency_ms, metadata->'token_usage' AS token_usage, created_at FROM rag_audit_logs ORDER BY created_at DESC LIMIT 10;"
 ```
 
 ## Run API Gateway Locally Without Docker

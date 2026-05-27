@@ -13,6 +13,21 @@ class Settings(BaseSettings):
     llm_provider: str = Field(alias="LLM_PROVIDER")
     llm_api_key: SecretStr = Field(alias="LLM_API_KEY")
     llm_model: str = Field(default="mock-rag-local", alias="LLM_MODEL")
+    llm_base_url: str = Field(default="", alias="LLM_BASE_URL")
+    llm_timeout_seconds: float = Field(
+        default=20.0,
+        alias="LLM_TIMEOUT_SECONDS",
+        gt=0,
+    )
+    llm_max_retries: int = Field(
+        default=2,
+        alias="LLM_MAX_RETRIES",
+        ge=0,
+    )
+    azure_openai_api_version: str = Field(
+        default="2024-02-15-preview",
+        alias="AZURE_OPENAI_API_VERSION",
+    )
 
     app_env: str = Field(default="local", alias="APP_ENV")
     service_name: str = Field(default="api-gateway", alias="SERVICE_NAME")

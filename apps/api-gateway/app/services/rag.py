@@ -168,6 +168,7 @@ class RAGQueryService:
             llm_model=response.llm_model,
             prompt_tokens=getattr(llm_response, "prompt_tokens", None),
             completion_tokens=getattr(llm_response, "completion_tokens", None),
+            total_tokens=getattr(llm_response, "total_tokens", None),
             latency_ms=latency_ms,
             response_status=response.status.value,
             compliance_status=response.compliance_status.value,

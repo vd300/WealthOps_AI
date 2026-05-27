@@ -21,7 +21,7 @@ os.environ.setdefault("APP_ENV", "test")
 from app.core.config import Settings
 from app.main import create_app
 from app.models.rag import RAGQueryRequest, RAGQueryResponse
-from app.services.llm import MockLLMClient
+from app.services.llm import MockLLMClient, create_llm_client
 from app.services.rag import RAGCitationBuilder, RAGPromptBuilder, RAGQueryService
 from app.services.vector_store import QdrantVectorStore, RetrievedChunk
 
@@ -214,6 +214,125 @@ def test_rag_query_endpoint_returns_typed_response(monkeypatch) -> None:
     assert body["status"] == "answered"
     assert body["citations"][0]["chunk_id"] == str(chunk_id)
     assert body["llm_provider"] == "mock"
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_client_calls_chat_completions_without_real_api_key(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "model": "gpt-test",
+                "choices": [{"message": {"content": "Grounded answer."}}],
+                "usage": {
+                    "prompt_tokens": 11,
+                    "completion_tokens": 3,
+                    "total_tokens": 14,
+                },
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", FakeAsyncClient)
+
+    client = create_llm_client(
+        _settings(
+            LLM_PROVIDER="openai",
+            LLM_API_KEY="unit-test-key",
+            LLM_BASE_URL="https://llm.example.test/v1",
+            LLM_MODEL="gpt-test",
+            LLM_TIMEOUT_SECONDS=7,
+            LLM_MAX_RETRIES=0,
+        )
+    )
+    response = await client.generate("Use only context.")
+
+    assert captured["url"] == "https://llm.example.test/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer unit-test-key"
+    assert captured["json"]["model"] == "gpt-test"
+    assert captured["json"]["messages"][0]["content"] == "Use only context."
+    assert captured["timeout"] == 7
+    assert response.provider == "openai"
+    assert response.prompt_tokens == 11
+    assert response.completion_tokens == 3
+    assert response.total_tokens == 14
+
+
+@pytest.mark.asyncio
+async def test_azure_openai_llm_client_uses_deployment_url_and_api_key_header(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [{"message": {"content": "Azure grounded answer."}}],
+                "usage": {"total_tokens": 9},
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json, headers):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.llm.httpx.AsyncClient", FakeAsyncClient)
+
+    client = create_llm_client(
+        _settings(
+            LLM_PROVIDER="azure_openai",
+            LLM_API_KEY="unit-test-key",
+            LLM_BASE_URL="https://wealthops-openai.openai.azure.com",
+            LLM_MODEL="gpt-4o-mini-deployment",
+            AZURE_OPENAI_API_VERSION="2024-10-21",
+            LLM_MAX_RETRIES=0,
+        )
+    )
+    response = await client.generate("Use only context.")
+
+    assert captured["url"] == (
+        "https://wealthops-openai.openai.azure.com/openai/deployments/"
+        "gpt-4o-mini-deployment/chat/completions?api-version=2024-10-21"
+    )
+    assert captured["headers"] == {"api-key": "unit-test-key"}
+    assert "model" not in captured["json"]
+    assert response.provider == "azure_openai"
+    assert response.model == "gpt-4o-mini-deployment"
+    assert response.total_tokens == 9
 
 
 class FakeEmbeddingProvider:

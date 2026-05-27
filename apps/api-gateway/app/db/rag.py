@@ -23,6 +23,7 @@ class RAGAuditRepository:
         llm_model: str,
         prompt_tokens: int | None,
         completion_tokens: int | None,
+        total_tokens: int | None,
         latency_ms: int,
         response_status: str,
         compliance_status: str,
@@ -31,6 +32,11 @@ class RAGAuditRepository:
         metadata: dict[str, Any] = {
             "document_ids": [str(document_id) for document_id in document_ids],
             "retrieved_chunk_ids": [str(chunk_id) for chunk_id in retrieved_chunk_ids],
+            "token_usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            },
         }
         async with _connect(self._settings) as connection:
             await connection.execute(
