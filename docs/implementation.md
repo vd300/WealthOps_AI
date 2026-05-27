@@ -10,6 +10,7 @@ This file tracks how the project is implemented. Update it as tasks are complete
 | Phase 2: Document Ingestion | Complete |
 | Phase 3: RAG Q&A | Complete |
 | Phase 3.5: Real LLM Provider Integration | Complete |
+| Phase 3.6: Document Discovery and RAG Usability Improvements | Complete |
 | Phase 4: Portfolio Intelligence | Not Started |
 | Phase 5: Compliance | Not Started |
 | Phase 6: Agentic Workflow | Not Started |
@@ -371,6 +372,75 @@ pytest
 - Token cost estimation is not implemented.
 - Real embedding providers are still deferred; document ingestion and retrieval continue to use the mock embedding provider unless extended later.
 - Provider-specific advanced options beyond model, base URL, timeout, retries, and Azure API version are not exposed yet.
+
+## Phase 3.6 Implementation Summary
+
+Phase 3.6 document discovery and RAG usability improvements are implemented.
+
+Implemented:
+
+- `GET /documents`
+- `GET /documents/{document_id}`
+- Upload responses now include top-level `document_id`, `filename`, `status`, and `chunk_count` fields while preserving the existing nested `document` object.
+- `POST /rag/query` validates supplied `document_ids` before retrieval.
+- Invalid UUID formats return a clear validation message telling manual testers to copy UUIDs from `GET /documents`.
+- Missing document UUIDs return a clear not-found error.
+- Existing but not indexed documents return a clear conflict error including status and `chunk_count`.
+- OpenAPI route descriptions and schema examples explain that APIs use UUIDs while user interfaces can show filenames.
+- README validation commands now use document discovery endpoints instead of requiring PostgreSQL lookups for manual RAG testing.
+
+## Phase 3.6 Design Decisions
+
+- UUIDs remain the stable internal and API identifiers for documents.
+- Filenames are user-facing display values and are returned in document metadata for usability.
+- Frontend clients should display filenames and statuses, then send UUID `document_id` values to backend APIs.
+- The backend does not accept filenames as primary identifiers because filenames can collide, change, or contain unsafe user-controlled text.
+
+## Phase 3.6 Files Changed
+
+- `apps/api-gateway/app/api/routes.py`
+- `apps/api-gateway/app/core/exceptions.py`
+- `apps/api-gateway/app/db/documents.py`
+- `apps/api-gateway/app/models/documents.py`
+- `apps/api-gateway/app/models/rag.py`
+- `apps/api-gateway/app/services/rag.py`
+- `tests/test_document_ingestion.py`
+- `tests/test_rag.py`
+- `README.md`
+- `docs/task.md`
+- `docs/implementation.md`
+
+## Phase 3.6 Validation Commands
+
+Upload a document:
+
+```powershell
+curl.exe -X POST http://localhost:8000/documents/upload -H "X-Uploaded-By: analyst-1" -F "file=@samples/phase2-sample.txt;type=text/plain"
+```
+
+List uploaded documents:
+
+```powershell
+curl.exe http://localhost:8000/documents
+```
+
+View one document by UUID:
+
+```powershell
+curl.exe http://localhost:8000/documents/<DOCUMENT_ID>
+```
+
+Ask a RAG question using that UUID:
+
+```powershell
+curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"document_ids\":[\"<DOCUMENT_ID>\"],\"top_k\":3}"
+```
+
+Test invalid document id behavior:
+
+```powershell
+curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"document_ids\":[\"phase2-sample.txt\"],\"top_k\":3}"
+```
 
 ## Phase 3 Intentionally Skipped Features
 

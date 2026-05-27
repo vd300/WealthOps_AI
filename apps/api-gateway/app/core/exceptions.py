@@ -35,13 +35,25 @@ def register_exception_handlers(app: FastAPI) -> None:
             "request_validation_failed",
             extra={"request_id": getattr(request.state, "request_id", None)},
         )
+        errors = exc.errors()
+        message = "Request validation failed."
+        if request.url.path == "/rag/query" and any(
+            "document_ids" in [str(part) for part in error.get("loc", [])]
+            for error in errors
+        ):
+            message = (
+                "Invalid document_id in document_ids. Each value must be a UUID copied "
+                "from GET /documents. User interfaces may show filenames, but POST "
+                "/rag/query requires document UUIDs."
+            )
+
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={
                 "error": {
                     "code": "validation_error",
-                    "message": "Request validation failed.",
-                    "details": exc.errors(),
+                    "message": message,
+                    "details": errors,
                     "request_id": getattr(request.state, "request_id", None),
                 }
             },

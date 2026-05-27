@@ -240,6 +240,18 @@ Acceptance criteria:
 - Stores provider, model, latency, and available token usage in RAG audit logs.
 - Keeps tests independent of real LLM API keys.
 
+### [x] Phase 3.6: Document Discovery and RAG Usability Improvements
+
+Acceptance criteria:
+
+- Adds `GET /documents` for uploaded document discovery.
+- Adds `GET /documents/{document_id}` for document details.
+- Upload response clearly returns `document_id`, `filename`, `status`, and `chunk_count`.
+- RAG validation clearly explains invalid, missing, and not-indexed `document_ids`.
+- README explains uploading, listing documents, copying `document_id`, and using it in `POST /rag/query`.
+- Swagger/OpenAPI examples use realistic UUIDs and explain that frontends can show filenames while APIs use UUIDs.
+- UUIDs remain the primary API identifiers; filenames are not used as primary identifiers.
+
 ## Phase 4: Portfolio Intelligence
 
 ### [ ] Task 4.1: Portfolio Upload API

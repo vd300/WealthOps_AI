@@ -42,6 +42,47 @@ class DocumentRepository:
             )
         return _document_from_row(row)
 
+    async def list_documents(self) -> list[DocumentRecord]:
+        async with _connect(self._settings) as connection:
+            rows = await connection.fetch(
+                """
+                SELECT *
+                FROM documents
+                ORDER BY created_at DESC
+                """
+            )
+        return [_document_from_row(row) for row in rows]
+
+    async def get_document(self, document_id: UUID) -> DocumentRecord | None:
+        async with _connect(self._settings) as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT *
+                FROM documents
+                WHERE id = $1
+                """,
+                document_id,
+            )
+        return _document_from_row(row) if row else None
+
+    async def get_documents_by_ids(
+        self,
+        document_ids: list[UUID],
+    ) -> list[DocumentRecord]:
+        if not document_ids:
+            return []
+
+        async with _connect(self._settings) as connection:
+            rows = await connection.fetch(
+                """
+                SELECT *
+                FROM documents
+                WHERE id = ANY($1::uuid[])
+                """,
+                document_ids,
+            )
+        return [_document_from_row(row) for row in rows]
+
     async def create_ingestion_job(self, document_id: UUID) -> UUID:
         async with _connect(self._settings) as connection:
             return await connection.fetchval(

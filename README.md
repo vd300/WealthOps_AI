@@ -2,7 +2,7 @@
 
 WealthOps AI is a secure, cloud-native AI platform for financial document intelligence, portfolio analysis, and compliance-aware LLM workflows.
 
-This repository currently implements **Phase 1: Foundation**, **Phase 2: Document Ingestion**, **Phase 3: RAG Q&A**, and **Phase 3.5: Real LLM Provider Integration**.
+This repository currently implements **Phase 1: Foundation**, **Phase 2: Document Ingestion**, **Phase 3: RAG Q&A**, **Phase 3.5: Real LLM Provider Integration**, and **Phase 3.6: Document Discovery and RAG Usability Improvements**.
 
 ## Phase 1 Includes
 
@@ -53,6 +53,14 @@ This repository currently implements **Phase 1: Foundation**, **Phase 2: Documen
 - Timeout and retry handling around real LLM calls
 - Sanitized provider logging for provider, model, latency, and failure reason
 - RAG audit log storage for provider, model, latency, and token usage when available
+
+## Phase 3.6 Includes
+
+- `GET /documents`
+- `GET /documents/{document_id}`
+- Upload responses with top-level `document_id`, `filename`, `status`, and `chunk_count`
+- Clear RAG validation messages for invalid, missing, and not-indexed `document_ids`
+- Swagger/OpenAPI descriptions and examples showing that APIs use UUIDs while user interfaces can display filenames
 
 ## Not Implemented Yet
 
@@ -167,6 +175,18 @@ Check document metadata and status in PostgreSQL:
 docker compose -f infra/docker-compose/docker-compose.yml exec postgres psql -U wealthops -d wealthops -c "SELECT id, filename, content_type, status, chunk_count, object_key, error_message FROM documents ORDER BY created_at DESC LIMIT 10;"
 ```
 
+List uploaded documents through the API:
+
+```powershell
+curl.exe http://localhost:8000/documents
+```
+
+View one uploaded document by UUID:
+
+```powershell
+curl.exe http://localhost:8000/documents/<DOCUMENT_ID>
+```
+
 Check ingestion jobs:
 
 ```bash
@@ -216,9 +236,11 @@ curl.exe -X POST http://localhost:8000/documents/upload -H "X-Uploaded-By: analy
 
 Check that the document is indexed:
 
-```bash
-docker compose -f infra/docker-compose/docker-compose.yml exec postgres psql -U wealthops -d wealthops -c "SELECT id, filename, status, chunk_count FROM documents ORDER BY created_at DESC LIMIT 5;"
+```powershell
+curl.exe http://localhost:8000/documents
 ```
+
+Copy an `id` from `GET /documents` where `status` is `INDEXED` and `chunk_count` is greater than `0`. The API uses UUIDs as stable internal identifiers; a frontend would show filenames such as `phase2-sample.txt` while sending the UUID in API requests.
 
 Call `POST /rag/query`:
 
@@ -226,19 +248,33 @@ Call `POST /rag/query`:
 curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"top_k\":5}"
 ```
 
-Test `document_id` filtering by copying an indexed document id from PostgreSQL:
+Test `document_id` filtering by copying an indexed document id from `GET /documents`:
 
 ```powershell
 curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"document_ids\":[\"<DOCUMENT_ID>\"],\"top_k\":3}"
 ```
 
-Test insufficient context behavior with a random UUID filter:
+Test invalid document id behavior with a filename instead of a UUID:
+
+```powershell
+curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"document_ids\":[\"phase2-sample.txt\"],\"top_k\":3}"
+```
+
+Test missing document id behavior with a random UUID filter:
 
 ```powershell
 curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What risks are mentioned?\",\"document_ids\":[\"00000000-0000-0000-0000-000000000000\"],\"top_k\":3}"
 ```
 
-Expected insufficient context fields:
+If a valid UUID exists but the document is still `UPLOADED`, `PROCESSING`, `FAILED`, or has `chunk_count` `0`, `/rag/query` returns a clear not-indexed error. Wait for `GET /documents/{document_id}` to show `INDEXED` with chunks before querying that document.
+
+Queries with no matching retrieved chunks still return an insufficient-context response:
+
+```powershell
+curl.exe -X POST http://localhost:8000/rag/query -H "Content-Type: application/json" -H "X-User-ID: analyst-1" -d "{\"question\":\"What is the debt maturity schedule?\",\"top_k\":5}"
+```
+
+Expected insufficient-context fields:
 
 ```json
 {

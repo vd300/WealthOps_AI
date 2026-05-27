@@ -2,8 +2,13 @@ from dataclasses import dataclass
 from time import perf_counter
 from uuid import UUID
 
+from fastapi import HTTPException, status
+
 from app.core.config import Settings
+from app.db.documents import DocumentRepository
+from app.db.migrations import run_migrations
 from app.db.rag import RAGAuditRepository
+from app.models.documents import DocumentStatus
 from app.models.rag import (
     ComplianceStatus,
     RAGCitation,
@@ -88,6 +93,7 @@ class RAGQueryService:
         vector_store: QdrantVectorStore | None = None,
         llm_client: LLMClient | None = None,
         audit_repository: RAGAuditRepository | None = None,
+        document_repository: DocumentRepository | None = None,
         prompt_builder: RAGPromptBuilder | None = None,
         citation_builder: RAGCitationBuilder | None = None,
     ) -> None:
@@ -96,6 +102,7 @@ class RAGQueryService:
         self._vector_store = vector_store or QdrantVectorStore(settings)
         self._llm_client = llm_client or create_llm_client(settings)
         self._audit_repository = audit_repository or RAGAuditRepository(settings)
+        self._document_repository = document_repository
         self._prompt_builder = prompt_builder or RAGPromptBuilder()
         self._citation_builder = citation_builder or RAGCitationBuilder()
 
@@ -107,6 +114,7 @@ class RAGQueryService:
         request_id: str | None,
     ) -> RAGQueryResponse:
         started_at = perf_counter()
+        await self._validate_document_filters(request.document_ids)
         query_vector = (await self._embedding_provider.embed_texts([request.question]))[0]
         chunks = await self._vector_store.search_chunks(
             query_vector=query_vector,
@@ -173,6 +181,57 @@ class RAGQueryService:
             response_status=response.status.value,
             compliance_status=response.compliance_status.value,
         )
+
+    async def _validate_document_filters(self, document_ids: list[UUID] | None) -> None:
+        if document_ids is None:
+            return
+
+        if not document_ids:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "document_ids was provided but does not contain a document_id. "
+                    "Omit document_ids to search all indexed documents, or pass at least one UUID "
+                    "copied from GET /documents."
+                ),
+            )
+
+        await run_migrations(self._settings)
+        repository = self._document_repository or DocumentRepository(self._settings)
+        documents = await repository.get_documents_by_ids(document_ids)
+        documents_by_id = {document.id: document for document in documents}
+
+        missing_ids = [document_id for document_id in document_ids if document_id not in documents_by_id]
+        if missing_ids:
+            missing_display = ", ".join(str(document_id) for document_id in missing_ids)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"document_id not found: {missing_display}. Use GET /documents to list "
+                    "uploaded documents and copy a valid UUID into POST /rag/query."
+                ),
+            )
+
+        not_indexed = [
+            document
+            for document in documents
+            if document.status != DocumentStatus.INDEXED or document.chunk_count <= 0
+        ]
+        if not_indexed:
+            details = "; ".join(
+                (
+                    f"{document.id} ({document.filename}) has status {document.status}"
+                    f" and chunk_count {document.chunk_count}"
+                )
+                for document in not_indexed
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"document_id is not indexed yet: {details}. Wait for status INDEXED "
+                    "with chunk_count greater than 0 before using it in POST /rag/query."
+                ),
+            )
 
 
 def _confidence_score(chunks: list[RetrievedChunk]) -> float:

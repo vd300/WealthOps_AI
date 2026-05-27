@@ -65,8 +65,83 @@ def test_upload_endpoint_accepts_supported_document(monkeypatch) -> None:
     assert response.status_code == 201
     body = response.json()
     assert body["document"]["filename"] == "example.txt"
+    assert body["document_id"] == body["document"]["id"]
+    assert body["filename"] == "example.txt"
     assert body["document"]["status"] == "INDEXED"
+    assert body["status"] == "INDEXED"
+    assert body["chunk_count"] == 1
     assert body["document"]["uploaded_by"] == "analyst-1"
+
+
+def test_list_documents_endpoint_returns_uploaded_document_metadata(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    document_id = uuid4()
+
+    class FakeDocumentRepository:
+        def __init__(self, settings):
+            self.settings = settings
+
+        async def list_documents(self):
+            return [
+                DocumentRecord(
+                    id=document_id,
+                    filename="phase2-sample.txt",
+                    content_type="text/plain",
+                    status=DocumentStatus.INDEXED,
+                    uploaded_by="analyst-1",
+                    file_size_bytes=98,
+                    chunk_count=2,
+                    created_at=now,
+                    updated_at=now,
+                )
+            ]
+
+    monkeypatch.setattr("app.api.routes.run_migrations", _noop_migration)
+    monkeypatch.setattr("app.api.routes.DocumentRepository", FakeDocumentRepository)
+
+    client = TestClient(_create_test_app())
+    response = client.get("/documents")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["documents"][0]["id"] == str(document_id)
+    assert body["documents"][0]["filename"] == "phase2-sample.txt"
+    assert body["documents"][0]["status"] == "INDEXED"
+
+
+def test_get_document_endpoint_returns_details(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    document_id = uuid4()
+
+    class FakeDocumentRepository:
+        def __init__(self, settings):
+            self.settings = settings
+
+        async def get_document(self, requested_document_id):
+            assert requested_document_id == document_id
+            return DocumentRecord(
+                id=document_id,
+                filename="annual-report.pdf",
+                content_type="application/pdf",
+                status=DocumentStatus.INDEXED,
+                uploaded_by="analyst-1",
+                file_size_bytes=1024,
+                chunk_count=5,
+                created_at=now,
+                updated_at=now,
+            )
+
+    monkeypatch.setattr("app.api.routes.run_migrations", _noop_migration)
+    monkeypatch.setattr("app.api.routes.DocumentRepository", FakeDocumentRepository)
+
+    client = TestClient(_create_test_app())
+    response = client.get(f"/documents/{document_id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == str(document_id)
+    assert body["filename"] == "annual-report.pdf"
+    assert body["chunk_count"] == 5
 
 
 def test_upload_validation_rejects_unsupported_file_type() -> None:

@@ -1,5 +1,6 @@
-from pathlib import Path
+from datetime import UTC, datetime
 import os
+from pathlib import Path
 import sys
 from uuid import uuid4
 
@@ -20,6 +21,7 @@ os.environ.setdefault("APP_ENV", "test")
 
 from app.core.config import Settings
 from app.main import create_app
+from app.models.documents import DocumentRecord, DocumentStatus
 from app.models.rag import RAGQueryRequest, RAGQueryResponse
 from app.services.llm import MockLLMClient, create_llm_client
 from app.services.rag import RAGCitationBuilder, RAGPromptBuilder, RAGQueryService
@@ -216,6 +218,101 @@ def test_rag_query_endpoint_returns_typed_response(monkeypatch) -> None:
     assert body["llm_provider"] == "mock"
 
 
+def test_rag_query_endpoint_explains_invalid_document_id_format() -> None:
+    client = TestClient(_create_test_app())
+    response = client.post(
+        "/rag/query",
+        json={"question": "What are the risks?", "document_ids": ["phase2-sample.txt"]},
+        headers={"X-User-ID": "analyst-1"},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert "Each value must be a UUID copied from GET /documents" in body["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_rag_service_rejects_missing_document_id(monkeypatch) -> None:
+    document_id = uuid4()
+
+    class FakeDocumentRepository:
+        async def get_documents_by_ids(self, document_ids):
+            assert document_ids == [document_id]
+            return []
+
+    monkeypatch.setattr("app.services.rag.run_migrations", _noop_migration)
+
+    service = RAGQueryService(
+        settings=_settings(),
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=FakeVectorStore([]),
+        llm_client=MockLLMClient(),
+        audit_repository=FakeAuditRepository(),
+        document_repository=FakeDocumentRepository(),
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        await service.query(
+            request=RAGQueryRequest(
+                question="What are the risks?",
+                document_ids=[document_id],
+                top_k=5,
+            ),
+            user_id="analyst-1",
+            request_id="req-missing-doc",
+        )
+
+    assert exc_info.value.status_code == 404
+    assert "document_id not found" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_rag_service_rejects_not_indexed_document_id(monkeypatch) -> None:
+    document_id = uuid4()
+
+    class FakeDocumentRepository:
+        async def get_documents_by_ids(self, document_ids):
+            now = datetime.now(UTC)
+            return [
+                DocumentRecord(
+                    id=document_id,
+                    filename="phase2-sample.txt",
+                    content_type="text/plain",
+                    status=DocumentStatus.PROCESSING,
+                    uploaded_by="analyst-1",
+                    file_size_bytes=98,
+                    chunk_count=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            ]
+
+    monkeypatch.setattr("app.services.rag.run_migrations", _noop_migration)
+
+    service = RAGQueryService(
+        settings=_settings(),
+        embedding_provider=FakeEmbeddingProvider(),
+        vector_store=FakeVectorStore([]),
+        llm_client=MockLLMClient(),
+        audit_repository=FakeAuditRepository(),
+        document_repository=FakeDocumentRepository(),
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        await service.query(
+            request=RAGQueryRequest(
+                question="What are the risks?",
+                document_ids=[document_id],
+                top_k=5,
+            ),
+            user_id="analyst-1",
+            request_id="req-not-indexed-doc",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "not indexed yet" in exc_info.value.detail
+
+
 @pytest.mark.asyncio
 async def test_openai_llm_client_calls_chat_completions_without_real_api_key(monkeypatch) -> None:
     captured = {}
@@ -357,6 +454,10 @@ class FakeAuditRepository:
 
     async def create_rag_audit_log(self, **kwargs):
         self.entries.append(kwargs)
+
+
+async def _noop_migration(settings) -> None:
+    return None
 
 
 def _chunk(
